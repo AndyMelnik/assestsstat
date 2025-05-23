@@ -6,8 +6,8 @@ import pandas as pd
 st.set_page_config(page_title="Navixy Dashboard", layout="wide")
 
 # Retrieve session_key from URL query parameters
-params = st.experimental_get_query_params()
-session_key = params.get("session_key", [""])[0]
+session_key = st.query_params["session_key"]
+
 if not session_key:
     st.error("Missing 'session_key' in URL. Please add '?session_key=<your_key>' to the URL.")
     st.stop()
