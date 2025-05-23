@@ -8,7 +8,7 @@ st.set_page_config(page_title="Asset Relations Dashboard", layout="wide")
 # Retrieve session_key from URL query parameters
 
 session_key = st.query_params["session_key"]
-#session_key = params.get("session_key", [""])[0]
+
 if not session_key:
     st.error("Missing 'session_key' in URL. Please add '?session_key=<your_key>' to the URL.")
     st.stop()
@@ -63,7 +63,7 @@ def load_data(session_key, api_base_url):
 
 # Page: Home
 def show_home():
-    st.title("Asset Relation Dashboard")
+    st.title("Welcome to Navixy Dashboard")
     st.write("Use the sidebar to navigate between pages.")
     st.write("\n**Available Pages:**")
     st.write("- Home: Overview page")
@@ -79,6 +79,14 @@ def show_mapping():
         st.info("No data to display. Check session key and API URL.")
         return
 
+    # Show raw vehicles table
+    st.subheader("1) Vehicles Table")
+    st.dataframe(vehicles)
+
+    # Show raw garages table
+    st.subheader("2) Garages Table")
+    st.dataframe(garages)
+
     # Merge on garage id
     merged = vehicles.merge(
         garages,
@@ -91,7 +99,9 @@ def show_mapping():
     # Select only columns that have any non-null values
     non_null_cols = merged.columns[merged.notnull().any()].tolist()
     merged = merged[non_null_cols]
-    st.subheader("Merged Vehicles & Garages Data")
+
+    # Show merged table
+    st.subheader("3) Merged Vehicles & Garages Data")
     st.dataframe(merged)
 
 # Main page routing
@@ -99,3 +109,4 @@ if page == "Home":
     show_home()
 elif page == "Vehicle-Garage Mapping":
     show_mapping()
+
