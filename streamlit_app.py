@@ -7,8 +7,8 @@ st.set_page_config(page_title="Asset Relations Dashboard", layout="wide")
 
 # Retrieve session_key from URL query parameters
 
-params = st.query_params["session_key"]
-session_key = params.get("session_key", [""])[0]
+session_key = st.query_params["session_key"]
+#session_key = params.get("session_key", [""])[0]
 if not session_key:
     st.error("Missing 'session_key' in URL. Please add '?session_key=<your_key>' to the URL.")
     st.stop()
