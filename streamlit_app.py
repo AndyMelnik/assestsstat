@@ -21,35 +21,26 @@ page = st.sidebar.radio("Navigate to", ["Home", "Vehicle-Garage Mapping"])
 st.sidebar.markdown("---")
 api_base_url = st.sidebar.text_input("API Base URL", value="https://api.eu.navixy.com/v2")
 
-# API call functions with enhanced checks
+# API call functions with full attribute retrieval
 def get_vehicles(api_url: str, session_key: str) -> pd.DataFrame:
     url = f"{api_url}/vehicle/list"
     payload = {"hash": session_key}
     try:
         resp = requests.post(url, json=payload)
-    except requests.RequestException as e:
-        st.error(f"Error connecting to Vehicles API: {e}")
-        return pd.DataFrame()
-    if resp.status_code != 200:
-        st.error(f"Vehicle API returned status {resp.status_code}")
-        return pd.DataFrame()
-    try:
+        resp.raise_for_status()
         data = resp.json()
-    except ValueError:
-        st.error("Vehicle API returned non-JSON response")
-        st.write(resp.text)
+    except Exception as e:
+        st.error(f"Error fetching vehicles: {e}")
         return pd.DataFrame()
-    if not data.get("success"):
-        st.error("Vehicle API returned success=false")
+
+    if not data.get("success") or "list" not in data:
+        st.error("Unexpected vehicles response format or success=false")
         st.write(data)
         return pd.DataFrame()
-    if "list" not in data:
-        st.error("Vehicle API missing 'list' in response")
-        st.write(data)
-        return pd.DataFrame()
-    if not data["list"]:
-        st.warning("Vehicle API returned empty list")
-    return pd.DataFrame(data.get("list", []))
+
+    # Use json_normalize to expand nested structures if any
+    vehicles_df = pd.json_normalize(data["list"])
+    return vehicles_df
 
 
 def get_garages(api_url: str, session_key: str) -> pd.DataFrame:
@@ -57,39 +48,26 @@ def get_garages(api_url: str, session_key: str) -> pd.DataFrame:
     payload = {"hash": session_key}
     try:
         resp = requests.post(url, json=payload)
-    except requests.RequestException as e:
-        st.error(f"Error connecting to Garages API: {e}")
-        return pd.DataFrame()
-    if resp.status_code != 200:
-        st.error(f"Garage API returned status {resp.status_code}")
-        return pd.DataFrame()
-    try:
+        resp.raise_for_status()
         data = resp.json()
-    except ValueError:
-        st.error("Garage API returned non-JSON response")
-        st.write(resp.text)
+    except Exception as e:
+        st.error(f"Error fetching garages: {e}")
         return pd.DataFrame()
-    if not data.get("success"):
-        st.error("Garage API returned success=false")
+
+    if not data.get("success") or "list" not in data:
+        st.error("Unexpected garages response format or success=false")
         st.write(data)
         return pd.DataFrame()
-    if "list" not in data:
-        st.error("Garage API missing 'list' in response")
-        st.write(data)
-        return pd.DataFrame()
-    list_data = data.get("list", [])
-    if not list_data:
-        st.warning("Garage API returned empty list")
-    # Flatten location dict
-    for item in list_data:
-        loc = item.pop("location", {})
-        item.update({
-            "lat": loc.get("lat"),
-            "lng": loc.get("lng"),
-            "address": loc.get("address"),
-            "radius": loc.get("radius"),
-        })
-    return pd.DataFrame(list_data)
+
+    # Use json_normalize to flatten the location dict into separate columns, while keeping original
+    garages_df = pd.json_normalize(
+        data["list"],
+        sep="_",
+        record_prefix="",
+        meta=[],
+        record_path=None
+    )
+    return garages_df
 
 @st.cache_data
 def load_data(session_key, api_base_url):
@@ -101,7 +79,13 @@ def load_data(session_key, api_base_url):
 def show_home():
     st.title("Welcome to Navixy Dashboard")
     st.markdown("**Use the sidebar to navigate between pages.**")
-    st.markdown("**Available Pages:**\n- Home: Overview page\n- Vehicle-Garage Mapping: Merge and display vehicles with their garage details.")
+    try:
+        vehicles, garages = load_data(session_key, api_base_url)
+        st.metric("Total Vehicles", len(vehicles))
+        st.metric("Total Garages", len(garages))
+    except Exception:
+        st.metric("Total Vehicles", 0)
+        st.metric("Total Garages", 0)
 
 # Page: Vehicle-Garage Mapping
 def show_mapping():
@@ -109,7 +93,7 @@ def show_mapping():
     with st.spinner("Loading data..."):
         vehicles, garages = load_data(session_key, api_base_url)
 
-    # Show counts for debugging
+    # Debug counts
     st.write(f"Retrieved **{len(vehicles)}** vehicles and **{len(garages)}** garages.")
 
     if vehicles.empty or garages.empty:
@@ -124,20 +108,21 @@ def show_mapping():
     st.subheader("2) Garages Table")
     st.dataframe(garages)
 
-    # Merge on garage id
+    # Merge on garage_id
     merged = vehicles.merge(
         garages,
         left_on="garage_id",
         right_on="id",
         suffixes=("_vehicle", "_garage"),
+        how="left"
     )
-    # Drop duplicate id_garage column
-    merged = merged.drop(columns=["id_garage"]).rename(columns={"id_vehicle": "vehicle_id"})
-    # Select only columns that have any non-null values
-    non_null_cols = merged.columns[merged.notnull().any()].tolist()
-    merged = merged[non_null_cols]
+    # Drop duplicate id_garage column if present
+    if "id_garage" in merged.columns:
+        merged = merged.drop(columns=["id_garage"])
+    if "id_vehicle" in merged.columns:
+        merged = merged.rename(columns={"id_vehicle": "vehicle_id"})
 
-    # Show merged table
+    # Show merged table with full schema
     st.subheader("3) Merged Vehicles & Garages Data")
     st.dataframe(merged)
 
