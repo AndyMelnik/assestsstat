@@ -3,23 +3,22 @@ import requests
 import pandas as pd
 
 # Set page config
-st.set_page_config(page_title="Asset Relations Dashboard", layout="wide")
+st.set_page_config(page_title="Navixy Dashboard", layout="wide")
 
 # Retrieve session_key from URL query parameters
-
-session_key = st.query_params["session_key"]
-
+params = st.experimental_get_query_params()
+session_key = params.get("session_key", [""])[0]
 if not session_key:
     st.error("Missing 'session_key' in URL. Please add '?session_key=<your_key>' to the URL.")
     st.stop()
 
 # Sidebar configuration
-st.sidebar.title("Mapping options")
+st.sidebar.title("Navixy Dashboard")
 page = st.sidebar.radio("Navigate to", ["Home", "Vehicle-Garage Mapping"])
 
 # Sidebar input for API base URL (common)
 st.sidebar.markdown("---")
-api_base_url = st.sidebar.text_input("API Base URL", value="https://api.eu.navixy.com/v2")
+api_base_url = st.sidebar.text_input("API Base URL", value="https://api.navixy.com")
 
 # API call functions
 def get_vehicles(api_url: str, session_key: str) -> pd.DataFrame:
@@ -109,4 +108,3 @@ if page == "Home":
     show_home()
 elif page == "Vehicle-Garage Mapping":
     show_mapping()
-
