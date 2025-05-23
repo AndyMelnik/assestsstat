@@ -1,4 +1,4 @@
-import streamlit as st
+uimport streamlit as st
 import requests
 import pandas as pd
 
@@ -18,7 +18,7 @@ page = st.sidebar.radio("Navigate to", ["Home", "Vehicle-Garage Mapping"])
 
 # Sidebar input for API base URL (common)
 st.sidebar.markdown("---")
-api_base_url = st.sidebar.text_input("API Base URL", value="https://api.navixy.com")
+api_base_url = st.sidebar.text_input("API Base URL", value="https://api.eu.navixy.com/v2")
 
 # API call functions
 def get_vehicles(api_url: str, session_key: str) -> pd.DataFrame:
