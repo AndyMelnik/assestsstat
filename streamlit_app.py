@@ -2,100 +2,126 @@ import streamlit as st
 import requests
 import pandas as pd
 
+API_BASE = "https://api.eu.navixy.com/v2"  # Replace if using another domain
+
+# -------------------------------
+# Step 1: Get Tracker List
+# -------------------------------
+def get_tracker_list(hash_key):
+    url = f"{API_BASE}/tracker/list"
+    response = requests.post(url, json={"hash": hash_key})
+    if response.status_code == 200:
+        return response.json().get("list", [])
+    else:
+        st.error(f"Tracker list API error: {response.status_code} - {response.text}")
+        return []
+
+# -------------------------------
+# Step 2: Get Tracker State
+# -------------------------------
+def get_tracker_state(hash_key, tracker_id):
+    url = f"{API_BASE}/tracker/get_state"
+    response = requests.post(url, json={"hash": hash_key, "tracker_id": tracker_id})
+    if response.status_code == 200:
+        return response.json().get("state", {})
+    else:
+        st.warning(f"Tracker state fetch failed for ID {tracker_id}")
+        return {}
+
+# -------------------------------
+# Step 3: Get Tags
+# -------------------------------
+def get_tag_map(hash_key):
+    url = f"{API_BASE}/tag/list"
+    response = requests.post(url, json={"hash": hash_key})
+    if response.status_code == 200:
+        return {tag["id"]: tag["name"] for tag in response.json().get("list", [])}
+    return {}
+
+# -------------------------------
+# Step 4: Get Vehicles
+# -------------------------------
+def get_vehicle_map(hash_key):
+    url = f"{API_BASE}/vehicle/list"
+    response = requests.post(url, json={"hash": hash_key})
+    if response.status_code == 200:
+        return {v["tracker_id"]: v for v in response.json().get("list", [])}
+    return {}
+
+# -------------------------------
+# Step 5: Get Employees
+# -------------------------------
+def get_employee_map(hash_key):
+    url = f"{API_BASE}/employee/list"
+    response = requests.post(url, json={"hash": hash_key})
+    if response.status_code == 200:
+        raw = response.json()
+        employee_list = raw if isinstance(raw, list) else raw.get("list", [])
+        return {e["tracker_id"]: e for e in employee_list if e.get("tracker_id") is not None}
+    return {}
+
+# -------------------------------
+# Step 6: Get Departments
+# -------------------------------
+def get_department_map(hash_key):
+    url = f"{API_BASE}/department/list"
+    response = requests.post(url, json={"hash": hash_key})
+    if response.status_code == 200:
+        return {d["id"]: d for d in response.json().get("list", [])}
+    return {}
+
+# -------------------------------
+# Step 7: Get Geofence Labels
+# -------------------------------
+def get_geofences_by_location(hash_key, lat, lng):
+    url = f"{API_BASE}/zone/search_location"
+    response = requests.post(url, json={"hash": hash_key, "location": {"lat": lat, "lng": lng}})
+    if response.status_code == 200:
+        return [z["label"] for z in response.json().get("list", [])]
+    return []
+
+# -------------------------------
+# MAIN STREAMLIT APP
+# -------------------------------
 st.title("Monitoring objects last status report")
 
 # Get session_key from the URL
-session_key = st.query_params["session_key"]
+hash_key = st.query_params["session_key"]
 
-if not session_key:
-    st.error("Missing session_key in URL")
+if not hash_key:
+    st.error("Missing session_key in URL.")
     st.stop()
 
-# Step 1: Get list of trackers
-trackers_resp = requests.post(
-    "https://api.eu.navixy.com/v2/tracker/list",
-    json={"hash": session_key}
-).json()
+st.info("Fetching and processing tracker data...")
 
-if not trackers_resp.get("success"):
-    st.error("Failed to fetch trackers")
-    st.stop()
+trackers = get_tracker_list(hash_key)
+tag_map = get_tag_map(hash_key)
+vehicle_map = get_vehicle_map(hash_key)
+employee_map = get_employee_map(hash_key)
+department_map = get_department_map(hash_key)
 
-trackers = trackers_resp["list"]
+final_data = []
 
-# Preload supporting data
-tag_list = requests.post(
-    "https:/api.eu.navixy.com/v2/tag/list",
-    json={"hash": session_key}
-).json().get("list", [])
-
-tag_map = {tag["id"]: tag["name"] for tag in tag_list}
-
-vehicle_list = requests.post(
-    "https://api.eu.navixy.com/v2/vehicle/list",
-    json={"hash": session_key}
-).json().get("list", [])
-
-vehicle_map = {v["tracker_id"]: v for v in vehicle_list}
-
-employee_list = requests.post(
-    "https://api.eu.navixy.com/v2/employee/list",
-    json={"hash": session_key}
-).json()
-
-employees = employee_list if isinstance(employee_list, list) else employee_list.get("list", [])
-employee_map = {e["tracker_id"]: e for e in employees if e["tracker_id"] is not None}
-
-dept_list = requests.post(
-    "https://api.eu.navixy.com/v2/department/list",
-    json={"hash": session_key}
-).json().get("list", [])
-
-dept_map = {d["id"]: d for d in dept_list}
-
-# Final output list
-combined_data = []
-
-# Step 2 onward: enrich each tracker
-for tracker in trackers:
-    tracker_id = tracker["id"]
-    source_id = tracker["source"]["id"]
-    tag_id = tracker.get("tag_bindings", [{}])[0].get("tag_id")
-
-    # Step 2: Get state
-    state_resp = requests.post(
-        "https://api.eu.navixy.com/v2/tracker/get_state",
-        json={"hash": session_key, "tracker_id": tracker_id}
-    ).json()
-    state = state_resp.get("state", {})
-
-    # Step 3: Tag name
-    tag_name = tag_map.get(tag_id, "")
-
-    # Step 4: Vehicle
+for t in trackers:
+    tracker_id = t["id"]
+    state = get_tracker_state(hash_key, tracker_id)
+    tag_id = t.get("tag_bindings", [{}])[0].get("tag_id")
+    source = t.get("source", {})
     vehicle = vehicle_map.get(tracker_id, {})
-    # Step 5: Employee
     employee = employee_map.get(tracker_id, {})
-    # Step 6: Department
-    dept = dept_map.get(employee.get("department_id")) if employee else {}
+    department = department_map.get(employee.get("department_id")) if employee else {}
 
-    # Step 7: Geofences
-    lat, lng = state.get("gps", {}).get("location", {}).get("lat"), state.get("gps", {}).get("location", {}).get("lng")
-    geofence_labels = []
-    if lat and lng:
-        zone_resp = requests.post(
-            "https://api.eu.navixy.com/v2/zone/search_location",
-            json={"hash": session_key, "location": {"lat": lat, "lng": lng}}
-        ).json()
-        geofence_labels = [z["label"] for z in zone_resp.get("list", [])]
+    gps = state.get("gps", {}).get("location", {})
+    lat, lng = gps.get("lat"), gps.get("lng")
+    geofences = get_geofences_by_location(hash_key, lat, lng) if lat and lng else []
 
-    combined_data.append({
+    final_data.append({
         "tracker_id": tracker_id,
-        "tracker_label": tracker.get("label"),
-        "group_id": tracker.get("group_id"),
-        "source_id": source_id,
-        "model": tracker["source"].get("model"),
-        "tag_name": tag_name,
+        "label": t.get("label"),
+        "group_id": t.get("group_id"),
+        "source_id": source.get("id"),
+        "model": source.get("model"),
+        "tag": tag_map.get(tag_id, ""),
         "gps_updated": state.get("gps", {}).get("updated"),
         "lat": lat,
         "lng": lng,
@@ -105,23 +131,24 @@ for tracker in trackers:
         "ignition": state.get("ignition"),
         "ignition_update": state.get("ignition_update"),
         "gsm_updated": state.get("gsm", {}).get("updated"),
-        "gsm_signal": state.get("gsm", {}).get("signal_level"),
+        "signal_level": state.get("gsm", {}).get("signal_level"),
         "battery_level": state.get("battery_level"),
         "battery_update": state.get("battery_update"),
         "vehicle_label": vehicle.get("label"),
         "vehicle_model": vehicle.get("model"),
-        "garage_name": vehicle.get("garage_organization_name"),
+        "garage": vehicle.get("garage_organization_name"),
         "reg_number": vehicle.get("reg_number"),
         "vin": vehicle.get("vin"),
         "employee_first_name": employee.get("first_name"),
         "employee_last_name": employee.get("last_name"),
         "employee_phone": employee.get("phone"),
-        "department_label": dept.get("label"),
-        "department_address": dept.get("location", {}).get("address") if dept else "",
-        "geofences": ", ".join(geofence_labels)
+        "department_label": department.get("label"),
+        "department_address": department.get("location", {}).get("address") if department else "",
+        "geofences": ", ".join(geofences)
     })
 
-# Show in Streamlit
-df = pd.DataFrame(combined_data)
+st.success(f"{len(final_data)} trackers processed.")
+
+df = pd.DataFrame(final_data)
 st.dataframe(df)
 
