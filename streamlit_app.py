@@ -105,7 +105,8 @@ final_data = []
 for t in trackers:
     tracker_id = t["id"]
     state = get_tracker_state(hash_key, tracker_id)
-    tag_id = t.get("tag_bindings", [{}])[0].get("tag_id")
+    tag_bindings = t.get("tag_bindings", [])
+    tag_id = tag_bindings[0].get("tag_id") if tag_bindings else None
     source = t.get("source", {})
     vehicle = vehicle_map.get(tracker_id, {})
     employee = employee_map.get(tracker_id, {})
