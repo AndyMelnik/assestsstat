@@ -2,132 +2,126 @@ import streamlit as st
 import requests
 import pandas as pd
 
-# Set page config
-st.set_page_config(page_title="Navixy Dashboard", layout="wide")
+st.title("Monitoring objects last status report")
 
-# Retrieve session_key from URL query parameters
-
+# Get session_key from the URL
 session_key = st.query_params["session_key"]
 
 if not session_key:
-    st.error("Missing 'session_key' in URL. Please add '?session_key=<your_key>' to the URL.")
+    st.error("Missing session_key in URL")
     st.stop()
 
-# Sidebar configuration
-st.sidebar.title("Navixy Dashboard")
-page = st.sidebar.radio("Navigate to", ["Home", "Vehicle-Garage Mapping"])
+# Step 1: Get list of trackers
+trackers_resp = requests.post(
+    "https://api.eu.navixy.com/v2/tracker/list",
+    json={"hash": session_key}
+).json()
 
-# Sidebar input for API base URL (common)
-st.sidebar.markdown("---")
-api_base_url = st.sidebar.text_input("API Base URL", value="https://api.eu.navixy.com/v2")
+if not trackers_resp.get("success"):
+    st.error("Failed to fetch trackers")
+    st.stop()
 
-# API call functions with full attribute retrieval
-def get_vehicles(api_url: str, session_key: str) -> pd.DataFrame:
-    url = f"{api_url}/vehicle/list"
-    payload = {"hash": session_key}
-    try:
-        resp = requests.post(url, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        st.error(f"Error fetching vehicles: {e}")
-        return pd.DataFrame()
+trackers = trackers_resp["list"]
 
-    if not data.get("success") or "list" not in data:
-        st.error("Unexpected vehicles response format or success=false")
-        st.write(data)
-        return pd.DataFrame()
+# Preload supporting data
+tag_list = requests.post(
+    "https:/api.eu.navixy.com/v2/tag/list",
+    json={"hash": session_key}
+).json().get("list", [])
 
-    # Use json_normalize to expand nested structures if any
-    vehicles_df = pd.json_normalize(data["list"])
-    return vehicles_df
+tag_map = {tag["id"]: tag["name"] for tag in tag_list}
 
+vehicle_list = requests.post(
+    "https://api.eu.navixy.com/v2/vehicle/list",
+    json={"hash": session_key}
+).json().get("list", [])
 
-def get_garages(api_url: str, session_key: str) -> pd.DataFrame:
-    url = f"{api_url}/garage/list"
-    payload = {"hash": session_key}
-    try:
-        resp = requests.post(url, json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        st.error(f"Error fetching garages: {e}")
-        return pd.DataFrame()
+vehicle_map = {v["tracker_id"]: v for v in vehicle_list}
 
-    if not data.get("success") or "list" not in data:
-        st.error("Unexpected garages response format or success=false")
-        st.write(data)
-        return pd.DataFrame()
+employee_list = requests.post(
+    "https://api.eu.navixy.com/v2/employee/list",
+    json={"hash": session_key}
+).json()
 
-    # Use json_normalize to flatten the location dict into separate columns, while keeping original
-    garages_df = pd.json_normalize(
-        data["list"],
-        sep="_",
-        record_prefix="",
-        meta=[],
-        record_path=None
-    )
-    return garages_df
+employees = employee_list if isinstance(employee_list, list) else employee_list.get("list", [])
+employee_map = {e["tracker_id"]: e for e in employees if e["tracker_id"] is not None}
 
-@st.cache_data
-def load_data(session_key, api_base_url):
-    vehicles_df = get_vehicles(api_base_url, session_key)
-    garages_df = get_garages(api_base_url, session_key)
-    return vehicles_df, garages_df
+dept_list = requests.post(
+    "https://api.eu.navixy.com/v2/department/list",
+    json={"hash": session_key}
+).json().get("list", [])
 
-# Page: Home
-def show_home():
-    st.title("Welcome to Navixy Dashboard")
-    st.markdown("**Use the sidebar to navigate between pages.**")
-    try:
-        vehicles, garages = load_data(session_key, api_base_url)
-        st.metric("Total Vehicles", len(vehicles))
-        st.metric("Total Garages", len(garages))
-    except Exception:
-        st.metric("Total Vehicles", 0)
-        st.metric("Total Garages", 0)
+dept_map = {d["id"]: d for d in dept_list}
 
-# Page: Vehicle-Garage Mapping
-def show_mapping():
-    st.title("Vehicle-Garage Mapping")
-    with st.spinner("Loading data..."):
-        vehicles, garages = load_data(session_key, api_base_url)
+# Final output list
+combined_data = []
 
-    # Debug counts
-    st.write(f"Retrieved **{len(vehicles)}** vehicles and **{len(garages)}** garages.")
+# Step 2 onward: enrich each tracker
+for tracker in trackers:
+    tracker_id = tracker["id"]
+    source_id = tracker["source"]["id"]
+    tag_id = tracker.get("tag_bindings", [{}])[0].get("tag_id")
 
-    if vehicles.empty or garages.empty:
-        st.info("No data to display. Check session key and API URL.")
-        return
+    # Step 2: Get state
+    state_resp = requests.post(
+        "https://api.eu.navixy.com/v2/tracker/get_state",
+        json={"hash": session_key, "tracker_id": tracker_id}
+    ).json()
+    state = state_resp.get("state", {})
 
-    # Show raw vehicles table
-    st.subheader("1) Vehicles Table")
-    st.dataframe(vehicles)
+    # Step 3: Tag name
+    tag_name = tag_map.get(tag_id, "")
 
-    # Show raw garages table
-    st.subheader("2) Garages Table")
-    st.dataframe(garages)
+    # Step 4: Vehicle
+    vehicle = vehicle_map.get(tracker_id, {})
+    # Step 5: Employee
+    employee = employee_map.get(tracker_id, {})
+    # Step 6: Department
+    dept = dept_map.get(employee.get("department_id")) if employee else {}
 
-    # Merge on garage_id
-    merged = vehicles.merge(
-        garages,
-        left_on="garage_id",
-        right_on="id",
-        suffixes=("_vehicle", "_garage"),
-        how="left"
-    )
-    # Drop duplicate id_garage column if present
-    if "id_garage" in merged.columns:
-        merged = merged.drop(columns=["id_garage"])
-    if "id_vehicle" in merged.columns:
-        merged = merged.rename(columns={"id_vehicle": "vehicle_id"})
+    # Step 7: Geofences
+    lat, lng = state.get("gps", {}).get("location", {}).get("lat"), state.get("gps", {}).get("location", {}).get("lng")
+    geofence_labels = []
+    if lat and lng:
+        zone_resp = requests.post(
+            "https://api.eu.navixy.com/v2/zone/search_location",
+            json={"hash": session_key, "location": {"lat": lat, "lng": lng}}
+        ).json()
+        geofence_labels = [z["label"] for z in zone_resp.get("list", [])]
 
-    # Show merged table with full schema
-    st.subheader("3) Merged Vehicles & Garages Data")
-    st.dataframe(merged)
+    combined_data.append({
+        "tracker_id": tracker_id,
+        "tracker_label": tracker.get("label"),
+        "group_id": tracker.get("group_id"),
+        "source_id": source_id,
+        "model": tracker["source"].get("model"),
+        "tag_name": tag_name,
+        "gps_updated": state.get("gps", {}).get("updated"),
+        "lat": lat,
+        "lng": lng,
+        "connection_status": state.get("connection_status"),
+        "movement_status": state.get("movement_status"),
+        "movement_status_update": state.get("movement_status_update"),
+        "ignition": state.get("ignition"),
+        "ignition_update": state.get("ignition_update"),
+        "gsm_updated": state.get("gsm", {}).get("updated"),
+        "gsm_signal": state.get("gsm", {}).get("signal_level"),
+        "battery_level": state.get("battery_level"),
+        "battery_update": state.get("battery_update"),
+        "vehicle_label": vehicle.get("label"),
+        "vehicle_model": vehicle.get("model"),
+        "garage_name": vehicle.get("garage_organization_name"),
+        "reg_number": vehicle.get("reg_number"),
+        "vin": vehicle.get("vin"),
+        "employee_first_name": employee.get("first_name"),
+        "employee_last_name": employee.get("last_name"),
+        "employee_phone": employee.get("phone"),
+        "department_label": dept.get("label"),
+        "department_address": dept.get("location", {}).get("address") if dept else "",
+        "geofences": ", ".join(geofence_labels)
+    })
 
-# Main page routing
-if page == "Home":
-    show_home()
-elif page == "Vehicle-Garage Mapping":
-    show_mapping()
+# Show in Streamlit
+df = pd.DataFrame(combined_data)
+st.dataframe(df)
+
