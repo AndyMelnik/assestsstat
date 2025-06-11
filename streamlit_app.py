@@ -81,6 +81,16 @@ def get_geofences_by_location(hash_key, lat, lng):
     return []
 
 # -------------------------------
+# Step 8: Get Group Titles
+# -------------------------------
+def get_group_map(hash_key):
+    url = f"{API_BASE}/tracker/group/list"
+    response = requests.post(url, json={"hash": hash_key})
+    if response.status_code == 200:
+        return {g["id"]: g["title"] for g in response.json().get("list", [])}
+    return {}
+
+# -------------------------------
 # MAIN STREAMLIT APP
 # -------------------------------
 st.title("Monitoring objects last status report")
@@ -99,18 +109,22 @@ tag_map = get_tag_map(hash_key)
 vehicle_map = get_vehicle_map(hash_key)
 employee_map = get_employee_map(hash_key)
 department_map = get_department_map(hash_key)
+group_map = get_group_map(hash_key)
 
 final_data = []
 
 for t in trackers:
     tracker_id = t["id"]
     state = get_tracker_state(hash_key, tracker_id)
+
     tag_bindings = t.get("tag_bindings", [])
     tag_id = tag_bindings[0].get("tag_id") if tag_bindings else None
+
     source = t.get("source", {})
     vehicle = vehicle_map.get(tracker_id, {})
     employee = employee_map.get(tracker_id, {})
     department = department_map.get(employee.get("department_id")) if employee else {}
+    group_title = group_map.get(t.get("group_id"))
 
     gps = state.get("gps", {}).get("location", {})
     lat, lng = gps.get("lat"), gps.get("lng")
@@ -120,6 +134,7 @@ for t in trackers:
         "tracker_id": tracker_id,
         "label": t.get("label"),
         "group_id": t.get("group_id"),
+        "group_title": group_title,
         "source_id": source.get("id"),
         "model": source.get("model"),
         "tag": tag_map.get(tag_id, ""),
@@ -153,3 +168,6 @@ st.success(f"{len(final_data)} trackers processed.")
 df = pd.DataFrame(final_data)
 st.dataframe(df)
 
+# Optional CSV download
+csv = df.to_csv(index=False).encode("utf-8")
+st.download_button("Download CSV", data=csv, file_name="tracker_data.csv", mime="text/csv")
