@@ -1,16 +1,15 @@
 import streamlit as st
 import requests
 import pandas as pd
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 API_BASE = "https://api.eu.navixy.com/v2"
 
 # -------------------------------
-# API Utility
+# API Utilities
 # -------------------------------
 def fetch_json(url, payload):
     try:
-        response = requests.post(url, json=payload, timeout=10)
+        response = requests.post(url, json=payload, timeout=15)
         if response.status_code == 200:
             return response.json()
     except requests.RequestException:
@@ -24,8 +23,14 @@ def get_tracker_list(hash_key):
     res = fetch_json(f"{API_BASE}/tracker/list", {"hash": hash_key})
     return res.get("list", []) if res else []
 
-def get_tracker_state(hash_key, tracker_id):
-    return fetch_json(f"{API_BASE}/tracker/get_state", {"hash": hash_key, "tracker_id": tracker_id})
+def get_all_tracker_states(hash_key, tracker_ids):
+    res = fetch_json(f"{API_BASE}/tracker/get_states", {
+        "hash": hash_key,
+        "trackers": tracker_ids,
+        "allow_not_exist": True,
+        "list_blocked": True
+    })
+    return res.get("states", {}) if res else {}
 
 def get_tag_map(hash_key):
     res = fetch_json(f"{API_BASE}/tag/list", {"hash": hash_key})
@@ -56,7 +61,7 @@ def get_geofences_by_location(hash_key, lat, lng):
     return [z["label"] for z in res.get("list", [])] if res else []
 
 # -------------------------------
-# Streamlit UI
+# MAIN APP
 # -------------------------------
 st.title("Assets Intelligence and Last Status Dashboard")
 
@@ -66,46 +71,35 @@ if not hash_key:
     st.error("Missing session_key in URL.")
     st.stop()
 
-st.info("Fetching tracker metadata...")
+st.info("Retrieving and fetching data...")
 
-# Fetch lookup data
+# Metadata loading
 trackers = get_tracker_list(hash_key)
+tracker_ids = [t["id"] for t in trackers]
+
 tag_map = get_tag_map(hash_key)
 vehicle_map = get_vehicle_map(hash_key)
 employee_map = get_employee_map(hash_key)
 department_map = get_department_map(hash_key)
 group_map = get_group_map(hash_key)
 
-# -------------------------------
-# Parallel fetch for states
-# -------------------------------
-st.info("Fetching tracker states...")
-
-def fetch_state_data(tracker):
-    tid = tracker["id"]
-    res = get_tracker_state(hash_key, tid)
-    return tid, res.get("state") if res else {}
-
-state_results = {}
-with ThreadPoolExecutor(max_workers=20) as executor:
-    futures = {executor.submit(fetch_state_data, t): t for t in trackers}
-    for future in as_completed(futures):
-        tid, state = future.result()
-        state_results[tid] = state
+# Efficient state loading
+st.info("Loading tracker states in bulk...")
+state_results = get_all_tracker_states(hash_key, tracker_ids)
 
 # -------------------------------
-# Build Final Dataset
+# Build Final Table
 # -------------------------------
 final_data = []
 
 for t in trackers:
     tracker_id = t["id"]
+    state = state_results.get(str(tracker_id), {})  # note: keys are strings
     source = t.get("source", {})
     tag_bindings = t.get("tag_bindings", [])
     tag_id = tag_bindings[0].get("tag_id") if tag_bindings else None
     group_id = t.get("group_id")
     group_title = group_map.get(group_id, "")
-    state = state_results.get(tracker_id, {})
 
     vehicle = vehicle_map.get(tracker_id, {})
     employee = employee_map.get(tracker_id, {})
@@ -149,7 +143,7 @@ for t in trackers:
     })
 
 # -------------------------------
-# Display and Export
+# Display
 # -------------------------------
 df = pd.DataFrame(final_data)
 st.success(f"{len(df)} trackers processed.")
