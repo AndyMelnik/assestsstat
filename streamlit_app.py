@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 
-API_BASE = "https://api.eu.navixy.com/v2"  # Replace if using another domain
+API_BASE = "https://api.eu.navixy.com/v2"  # Replace if different
 
 # -------------------------------
 # Step 1: Get Tracker List
@@ -93,16 +93,16 @@ def get_group_map(hash_key):
 # -------------------------------
 # MAIN STREAMLIT APP
 # -------------------------------
-st.title("Assets Last Status Report")
+st.title("Assets Intellegence and Last Status Dashboard")
 
-# Get session_key from the URL
-hash_key = st.query_params["session_key"]
+query_params = st.experimental_get_query_params()
+hash_key = query_params.get("session_key", [""])[0]
 
 if not hash_key:
-    st.error("Missing session_key in URL.")
+    st.error("Missing session_key in URL. Please provide it as a query parameter.")
     st.stop()
 
-st.info("Fetching and processing tracker data...")
+st.info("Fetching tracker data...")
 
 trackers = get_tracker_list(hash_key)
 tag_map = get_tag_map(hash_key)
@@ -123,8 +123,12 @@ for t in trackers:
     source = t.get("source", {})
     vehicle = vehicle_map.get(tracker_id, {})
     employee = employee_map.get(tracker_id, {})
-    department = department_map.get(employee.get("department_id")) if employee else {}
-    group_title = group_map.get(t.get("group_id"))
+
+    department_id = employee.get("department_id") if employee else None
+    department = department_map.get(department_id, {})
+
+    group_id = t.get("group_id")
+    group_title = group_map.get(group_id, "")
 
     gps = state.get("gps", {}).get("location", {})
     lat, lng = gps.get("lat"), gps.get("lng")
@@ -132,35 +136,35 @@ for t in trackers:
 
     final_data.append({
         "tracker_id": tracker_id,
-        "Tracker label": t.get("label"),
-        "Group name": group_title,
+        "label": t.get("label"),
+        "group_id": group_id,
+        "group_title": group_title,
         "source_id": source.get("id"),
-        "Tracker model": source.get("model"),
-        "Tag": tag_map.get(tag_id, ""),
-        "GPS updated": state.get("gps", {}).get("updated"),
-        "GPS signal level": state.get("gps", {}).get("signal_level"),
-        "GPS speed": state.get("gps", {}).get("speed"),
-        "GPS altitude": state.get("gps", {}).get("alt"),
-        "Latitude": lat,
-        "Longitude": lng,
-        "Connection status": state.get("connection_status"),
-        "Movement status": state.get("movement_status"),
-        "Movement status update": state.get("movement_status_update"),
-        "GSM update": state.get("gsm", {}).get("updated"),
-        "GSM signal level": state.get("gsm", {}).get("signal_level"),
-        "Battery level": state.get("battery_level"),
-        "Battery update": state.get("battery_update"),
-        "Vehicle label": vehicle.get("label"),
-        "Vehicle model": vehicle.get("model"),
-        "Garage label": vehicle.get("garage_organization_name"),
-        "Registration number": vehicle.get("reg_number"),
-        "VIN": vehicle.get("vin"),
-        "Employee first name": employee.get("first_name"),
-        "Employee last name": employee.get("last_name"),
-        "Employee phone": employee.get("phone"),
-        "Department label": department.get("label"),
-        "Department address": department.get("location", {}).get("address") if department else "",
-        "Geofences current location": ", ".join(geofences)
+        "model": source.get("model"),
+        "tag": tag_map.get(tag_id, ""),
+        "gps_updated": state.get("gps", {}).get("updated"),
+        "lat": lat,
+        "lng": lng,
+        "connection_status": state.get("connection_status"),
+        "movement_status": state.get("movement_status"),
+        "movement_status_update": state.get("movement_status_update"),
+        "ignition": state.get("ignition"),
+        "ignition_update": state.get("ignition_update"),
+        "gsm_updated": state.get("gsm", {}).get("updated"),
+        "signal_level": state.get("gsm", {}).get("signal_level"),
+        "battery_level": state.get("battery_level"),
+        "battery_update": state.get("battery_update"),
+        "vehicle_label": vehicle.get("label"),
+        "vehicle_model": vehicle.get("model"),
+        "garage": vehicle.get("garage_organization_name"),
+        "reg_number": vehicle.get("reg_number"),
+        "vin": vehicle.get("vin"),
+        "employee_first_name": employee.get("first_name"),
+        "employee_last_name": employee.get("last_name"),
+        "employee_phone": employee.get("phone"),
+        "department_label": department.get("label", ""),
+        "department_address": department.get("location", {}).get("address", ""),
+        "geofences": ", ".join(geofences)
     })
 
 st.success(f"{len(final_data)} trackers processed.")
@@ -171,3 +175,4 @@ st.dataframe(df)
 # Optional CSV download
 csv = df.to_csv(index=False).encode("utf-8")
 st.download_button("Download CSV", data=csv, file_name="tracker_data.csv", mime="text/csv")
+
