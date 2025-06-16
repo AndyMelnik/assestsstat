@@ -1,109 +1,74 @@
 import streamlit as st
 import requests
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-API_BASE = "https://api.eu.navixy.com/v2"  # Replace if different
+API_BASE = "https://api.eu.navixy.com/v2"
 
 # -------------------------------
-# Step 1: Get Tracker List
+# API Utility
+# -------------------------------
+def fetch_json(url, payload):
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+    except requests.RequestException:
+        return None
+    return None
+
+# -------------------------------
+# API Functions
 # -------------------------------
 def get_tracker_list(hash_key):
-    url = f"{API_BASE}/tracker/list"
-    response = requests.post(url, json={"hash": hash_key})
-    if response.status_code == 200:
-        return response.json().get("list", [])
-    else:
-        st.error(f"Tracker list API error: {response.status_code} - {response.text}")
-        return []
+    res = fetch_json(f"{API_BASE}/tracker/list", {"hash": hash_key})
+    return res.get("list", []) if res else []
 
-# -------------------------------
-# Step 2: Get Tracker State
-# -------------------------------
 def get_tracker_state(hash_key, tracker_id):
-    url = f"{API_BASE}/tracker/get_state"
-    response = requests.post(url, json={"hash": hash_key, "tracker_id": tracker_id})
-    if response.status_code == 200:
-        return response.json().get("state", {})
-    else:
-        st.warning(f"Tracker state fetch failed for ID {tracker_id}")
-        return {}
+    return fetch_json(f"{API_BASE}/tracker/get_state", {"hash": hash_key, "tracker_id": tracker_id})
 
-# -------------------------------
-# Step 3: Get Tags
-# -------------------------------
 def get_tag_map(hash_key):
-    url = f"{API_BASE}/tag/list"
-    response = requests.post(url, json={"hash": hash_key})
-    if response.status_code == 200:
-        return {tag["id"]: tag["name"] for tag in response.json().get("list", [])}
-    return {}
+    res = fetch_json(f"{API_BASE}/tag/list", {"hash": hash_key})
+    return {t["id"]: t["name"] for t in res.get("list", [])} if res else {}
 
-# -------------------------------
-# Step 4: Get Vehicles
-# -------------------------------
 def get_vehicle_map(hash_key):
-    url = f"{API_BASE}/vehicle/list"
-    response = requests.post(url, json={"hash": hash_key})
-    if response.status_code == 200:
-        return {v["tracker_id"]: v for v in response.json().get("list", [])}
-    return {}
+    res = fetch_json(f"{API_BASE}/vehicle/list", {"hash": hash_key})
+    return {v["tracker_id"]: v for v in res.get("list", [])} if res else {}
 
-# -------------------------------
-# Step 5: Get Employees
-# -------------------------------
 def get_employee_map(hash_key):
-    url = f"{API_BASE}/employee/list"
-    response = requests.post(url, json={"hash": hash_key})
-    if response.status_code == 200:
-        raw = response.json()
-        employee_list = raw if isinstance(raw, list) else raw.get("list", [])
-        return {e["tracker_id"]: e for e in employee_list if e.get("tracker_id") is not None}
-    return {}
+    res = fetch_json(f"{API_BASE}/employee/list", {"hash": hash_key})
+    employee_list = res if isinstance(res, list) else res.get("list", [])
+    return {e["tracker_id"]: e for e in employee_list if e.get("tracker_id")} if employee_list else {}
 
-# -------------------------------
-# Step 6: Get Departments
-# -------------------------------
 def get_department_map(hash_key):
-    url = f"{API_BASE}/department/list"
-    response = requests.post(url, json={"hash": hash_key})
-    if response.status_code == 200:
-        return {d["id"]: d for d in response.json().get("list", [])}
-    return {}
+    res = fetch_json(f"{API_BASE}/department/list", {"hash": hash_key})
+    return {d["id"]: d for d in res.get("list", [])} if res else {}
 
-# -------------------------------
-# Step 7: Get Geofence Labels
-# -------------------------------
-def get_geofences_by_location(hash_key, lat, lng):
-    url = f"{API_BASE}/zone/search_location"
-    response = requests.post(url, json={"hash": hash_key, "location": {"lat": lat, "lng": lng}})
-    if response.status_code == 200:
-        return [z["label"] for z in response.json().get("list", [])]
-    return []
-
-# -------------------------------
-# Step 8: Get Group Titles
-# -------------------------------
 def get_group_map(hash_key):
-    url = f"{API_BASE}/tracker/group/list"
-    response = requests.post(url, json={"hash": hash_key})
-    if response.status_code == 200:
-        return {g["id"]: g["title"] for g in response.json().get("list", [])}
-    return {}
+    res = fetch_json(f"{API_BASE}/tracker/group/list", {"hash": hash_key})
+    return {g["id"]: g["title"] for g in res.get("list", [])} if res else {}
+
+def get_geofences_by_location(hash_key, lat, lng):
+    res = fetch_json(f"{API_BASE}/zone/search_location", {
+        "hash": hash_key,
+        "location": {"lat": lat, "lng": lng}
+    })
+    return [z["label"] for z in res.get("list", [])] if res else []
 
 # -------------------------------
-# MAIN STREAMLIT APP
+# Streamlit UI
 # -------------------------------
-st.title("Assets Intellegence and Last Status Dashboard")
-
+st.title("Assets Intelligence and Last Status Dashboard")
 
 hash_key = st.query_params["session_key"]
 
 if not hash_key:
-    st.error("Missing session_key in URL. Please provide it as a query parameter.")
+    st.error("Missing session_key in URL.")
     st.stop()
 
-st.info("Fetching tracker data...")
+st.info("Fetching tracker metadata...")
 
+# Fetch lookup data
 trackers = get_tracker_list(hash_key)
 tag_map = get_tag_map(hash_key)
 vehicle_map = get_vehicle_map(hash_key)
@@ -111,24 +76,40 @@ employee_map = get_employee_map(hash_key)
 department_map = get_department_map(hash_key)
 group_map = get_group_map(hash_key)
 
+# -------------------------------
+# Parallel fetch for states
+# -------------------------------
+st.info("Fetching tracker states...")
+
+def fetch_state_data(tracker):
+    tid = tracker["id"]
+    res = get_tracker_state(hash_key, tid)
+    return tid, res.get("state") if res else {}
+
+state_results = {}
+with ThreadPoolExecutor(max_workers=20) as executor:
+    futures = {executor.submit(fetch_state_data, t): t for t in trackers}
+    for future in as_completed(futures):
+        tid, state = future.result()
+        state_results[tid] = state
+
+# -------------------------------
+# Build Final Dataset
+# -------------------------------
 final_data = []
 
 for t in trackers:
     tracker_id = t["id"]
-    state = get_tracker_state(hash_key, tracker_id)
-
+    source = t.get("source", {})
     tag_bindings = t.get("tag_bindings", [])
     tag_id = tag_bindings[0].get("tag_id") if tag_bindings else None
-
-    source = t.get("source", {})
-    vehicle = vehicle_map.get(tracker_id, {})
-    employee = employee_map.get(tracker_id, {})
-
-    department_id = employee.get("department_id") if employee else None
-    department = department_map.get(department_id, {})
-
     group_id = t.get("group_id")
     group_title = group_map.get(group_id, "")
+    state = state_results.get(tracker_id, {})
+
+    vehicle = vehicle_map.get(tracker_id, {})
+    employee = employee_map.get(tracker_id, {})
+    department = department_map.get(employee.get("department_id")) if employee else {}
 
     gps = state.get("gps", {}).get("location", {})
     lat, lng = gps.get("lat"), gps.get("lng")
@@ -167,12 +148,12 @@ for t in trackers:
         "geofences": ", ".join(geofences)
     })
 
-st.success(f"{len(final_data)} trackers processed.")
-
+# -------------------------------
+# Display and Export
+# -------------------------------
 df = pd.DataFrame(final_data)
+st.success(f"{len(df)} trackers processed.")
 st.dataframe(df)
 
-# Optional CSV download
 csv = df.to_csv(index=False).encode("utf-8")
-st.download_button("Download CSV", data=csv, file_name="tracker_data.csv", mime="text/csv")
-
+st.download_button("Download CSV", csv, "trackers_full_export.csv", "text/csv")
