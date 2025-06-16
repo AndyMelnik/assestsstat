@@ -93,7 +93,7 @@ def get_group_map(hash_key):
 # -------------------------------
 # MAIN STREAMLIT APP
 # -------------------------------
-st.title("Monitoring objects last status report")
+st.title("Assets Last Status Report")
 
 # Get session_key from the URL
 hash_key = st.query_params["session_key"]
