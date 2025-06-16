@@ -63,7 +63,7 @@ def get_geofences_by_location(hash_key, lat, lng):
 # -------------------------------
 # MAIN APP
 # -------------------------------
-st.title("Assets Intelligence and Last Status Dashboard")
+st.title("Assets Last Status Dashboard")
 
 hash_key = st.query_params["session_key"]
 
@@ -71,7 +71,7 @@ if not hash_key:
     st.error("Missing session_key in URL.")
     st.stop()
 
-st.info("Retrieving and fetching data...")
+st.info("Extracting and fetching data...")
 
 # Metadata loading
 trackers = get_tracker_list(hash_key)
