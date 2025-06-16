@@ -95,8 +95,8 @@ def get_group_map(hash_key):
 # -------------------------------
 st.title("Assets Intellegence and Last Status Dashboard")
 
-query_params = st.experimental_get_query_params()
-hash_key = query_params.get("session_key", [""])[0]
+
+hash_key = st.query_params["session_key"]
 
 if not hash_key:
     st.error("Missing session_key in URL. Please provide it as a query parameter.")
