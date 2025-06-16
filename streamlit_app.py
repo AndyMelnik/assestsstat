@@ -5,7 +5,7 @@ import pandas as pd
 API_BASE = "https://api.eu.navixy.com/v2"
 
 # -------------------------------
-# API Utilities
+# API Utility Function
 # -------------------------------
 def fetch_json(url, payload):
     try:
@@ -17,7 +17,7 @@ def fetch_json(url, payload):
     return None
 
 # -------------------------------
-# API Functions
+# API Call Functions
 # -------------------------------
 def get_tracker_list(hash_key):
     res = fetch_json(f"{API_BASE}/tracker/list", {"hash": hash_key})
@@ -61,9 +61,9 @@ def get_geofences_by_location(hash_key, lat, lng):
     return [z["label"] for z in res.get("list", [])] if res else []
 
 # -------------------------------
-# MAIN APP
+# Streamlit App
 # -------------------------------
-st.title("Assets Last Status Dashboard")
+st.title("Asset Last Status Report")
 
 hash_key = st.query_params["session_key"]
 
@@ -71,9 +71,9 @@ if not hash_key:
     st.error("Missing session_key in URL.")
     st.stop()
 
-st.info("Extracting and fetching data...")
+st.info("Extracting and fetching tracker data...")
 
-# Metadata loading
+# Metadata loads
 trackers = get_tracker_list(hash_key)
 tracker_ids = [t["id"] for t in trackers]
 
@@ -83,18 +83,18 @@ employee_map = get_employee_map(hash_key)
 department_map = get_department_map(hash_key)
 group_map = get_group_map(hash_key)
 
-# Efficient state loading
-st.info("Loading tracker states in bulk...")
+# Bulk state fetch
+st.info("Fetching tracker states in one call...")
 state_results = get_all_tracker_states(hash_key, tracker_ids)
 
 # -------------------------------
-# Build Final Table
+# Build Final Data Table
 # -------------------------------
 final_data = []
 
 for t in trackers:
     tracker_id = t["id"]
-    state = state_results.get(str(tracker_id), {})  # note: keys are strings
+    state = state_results.get(str(tracker_id), {})  # tracker_id is string in response
     source = t.get("source", {})
     tag_bindings = t.get("tag_bindings", [])
     tag_id = tag_bindings[0].get("tag_id") if tag_bindings else None
@@ -103,7 +103,9 @@ for t in trackers:
 
     vehicle = vehicle_map.get(tracker_id, {})
     employee = employee_map.get(tracker_id, {})
-    department = department_map.get(employee.get("department_id")) if employee else {}
+
+    department_id = employee.get("department_id") if employee else None
+    department = department_map.get(department_id) or {}
 
     gps = state.get("gps", {}).get("location", {})
     lat, lng = gps.get("lat"), gps.get("lng")
@@ -143,11 +145,12 @@ for t in trackers:
     })
 
 # -------------------------------
-# Display
+# Display Data
 # -------------------------------
 df = pd.DataFrame(final_data)
 st.success(f"{len(df)} trackers processed.")
 st.dataframe(df)
 
+# CSV Export
 csv = df.to_csv(index=False).encode("utf-8")
 st.download_button("Download CSV", csv, "trackers_full_export.csv", "text/csv")
